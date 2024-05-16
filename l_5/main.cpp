@@ -91,7 +91,7 @@ Vec2f interpolateTextureCoordinates(const Vec2f &tc0, const Vec2f &tc1, const Ve
     return tc0 * baryCoords.x + tc1 * baryCoords.y + tc2 * baryCoords.z;
 }
  
-void triangle(Vec3f *pts, Vec2f *tex_coords, float *zbuffer, TGAImage &image, TGAImage &texture,TGAImage &normale, Vec3f light_dir,float intensities[3], int width) {
+void triangle(Vec3f *pts, Vec2f *tex_coords,Vec3f *norm, float *zbuffer, TGAImage &image, TGAImage &texture,TGAImage &normale, Vec3f light_dir,float intensities[3], int width) {
     Vec2i boxMin, boxMax;
     for (int i = 0; i < 3; i++) {
         boxMin.x = std::min(boxMin.x, static_cast<int>(pts[i].x));
@@ -109,21 +109,26 @@ void triangle(Vec3f *pts, Vec2f *tex_coords, float *zbuffer, TGAImage &image, TG
             int idx = int(P.x + P.y * width);
             if (zbuffer[idx] < P.z) {
                 zbuffer[idx] = P.z;
-               
+
                 Vec2f texCoord = interpolateTextureCoordinates(tex_coords[0], tex_coords[1], tex_coords[2], baryCoords);
                 int tex_x = int(texCoord.x * texture.get_width());
                 int tex_y = int(texCoord.y * texture.get_height());
+                
+                Vec3f n0 = norm[0];
+                Vec3f n1 = norm[1];
+                Vec3f n2 = norm[2];
 
-                TGAColor color = normale.get(tex_x, texture.get_height() - tex_y);
-                Vec3f normal(
-                        (color.r / 255.0f) * 2 - 1,
-                        (color.g / 255.0f) * 2 - 1,
-                        (color.b / 255.0f) * 2 - 1
-                    );
-                float intensity = normal * light_dir;
-                intensity = std::max(0.0f, std::min(1.0f, intensity));
-                color = texture.get(tex_x, texture.get_height() - tex_y);
-                color = color * intensity;
+                float intensity0 = n0 * light_dir;
+                float intensity1 = n1 * light_dir;
+                float intensity2 = n2 * light_dir;
+
+                float interpolated_intensity = baryCoords.x * intensity0 +
+                                                   baryCoords.y * intensity1 +
+                                                   baryCoords.z * intensity2;
+
+                interpolated_intensity = std::max(0.0f, std::min(1.0f, interpolated_intensity));                              
+
+                TGAColor color(255 * interpolated_intensity, 255 * interpolated_intensity, 255 * interpolated_intensity, 255);
                 image.set(P.x, P.y, color);
             }
         }
@@ -154,13 +159,15 @@ int main(int argc, char** argv) {
     Matrix ModelView  = lookat(eye, center, Vec3f(0,1,0));
     Matrix Projection = Matrix::identity(4);
     Matrix ViewPort   = viewport(width/8, height/8, width*3/4, height*3/4);
-    Projection[3][2] = -1.f/(eye-center).norm();
-    
+    Matrix z = (ViewPort*Projection*ModelView);
+    Projection[3][2] = -1.f/(eye-center).norm();    
+
 	for (int i = 0; i < model->nfaces(); i++) {
         std::vector<int> face = model->face(i);
         Vec3f screen_coords[3];
         Vec3f world_coords[3];
         Vec2f tex_coords[3];
+        Vec3f norm_coords[3];
         float intensities[3];
 
         for (int j = 0; j < 3; j++) {
@@ -171,10 +178,12 @@ int main(int argc, char** argv) {
             int vt_index = model->texture_index(i, j);
             tex_coords[j] = model->texture(vt_index);
 
+            int vn_index = model->normal_index(i, j);
+            norm_coords[j] = model->normal(vn_index);
             intensities[j] = v * light_dir;
         }
     
-        triangle(screen_coords, tex_coords, zbuffer, image, texture, normale, light_dir, intensities, image.get_width());
+        triangle(screen_coords, tex_coords, norm_coords, zbuffer, image, texture, normale, light_dir, intensities, image.get_width());
         
     }
 
